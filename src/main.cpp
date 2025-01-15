@@ -86,8 +86,8 @@ enum return_codes {
 int main(int argc, char** argv) {
     try {
         auto root = fc::app_path();
-        app().set_default_data_dir(root / "eosio/" APP_NAME "/data");
-        app().set_default_config_dir(root / "eosio/" APP_NAME "/config");
+        app().set_default_data_dir(root / "flon/" APP_NAME "/data");
+        app().set_default_config_dir(root / "flon/" APP_NAME "/config");
         if (!app().initialize<DEFAULT_PLUGINS>(argc, argv))
             return initialize_fail;
         initialize_logging();
