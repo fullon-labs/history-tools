@@ -10,3 +10,6 @@ _book
 /CMakeLists.txt.user
 .cicd/helpers/docker-compose.yaml
 .cicd/helpers/snapshot.bin
+
+.build*
+.test*

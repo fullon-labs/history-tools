@@ -22,7 +22,12 @@ RUN apt-get update && \
     rm -rf /var/cache/apt/lists/*
 
 FROM base as builder
+ARG VERSION_STRING
 WORKDIR /root
+RUN if [ -z "${VERSION_STRING}" ]; then \
+        echo "ARG VERSION_STRING is empty"; \
+        exit 1 ; \
+    fi
 RUN mkdir /root/history-tools
 COPY cmake /root/history-tools/cmake
 COPY CMakeLists.txt /root/history-tools
@@ -33,9 +38,11 @@ COPY unittests /root/history-tools/unittests
 
 RUN mkdir /root/history-tools/build
 WORKDIR /root/history-tools/build
-RUN cmake -GNinja -DCMAKE_BUILD_TYPE=Release -DPostgreSQL_TYPE_INCLUDE_DIR=/usr/include/postgresql .. && \
-    ninja
-    # ctest --output-on-failure
+RUN cmake -GNinja -DCMAKE_BUILD_TYPE=Release \
+          -DPostgreSQL_TYPE_INCLUDE_DIR=/usr/include/postgresql \
+          -DVERSION_STRING=${VERSION_STRING} .. \
+    && ninja
+    # && ctest --output-on-failure
 
 FROM ubuntu:20.04
 RUN apt-get update && \
