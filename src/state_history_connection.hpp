@@ -11,6 +11,7 @@
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/beast/core.hpp>
 #include <boost/beast/websocket.hpp>
+#include <boost/algorithm/string/predicate.hpp>
 #include <fc/exception/exception.hpp>
 
 namespace state_history {
@@ -19,9 +20,10 @@ struct connection_callbacks {
     virtual ~connection_callbacks() = default;
     virtual void received_abi(eosio::abi&& abi) {}
     virtual bool received(eosio::ship_protocol::get_status_result_v0& /*status*/) { return true; }
+    virtual bool received(eosio::ship_protocol::get_status_result_v1& /*status*/) { return true; }
     virtual bool received(eosio::ship_protocol::get_blocks_result_v0& /*result*/) { return true; }
     virtual bool received(eosio::ship_protocol::get_blocks_result_v1& /*result*/) { return true; }
-    virtual bool received(eosio::ship_protocol::get_blocks_result_v2& /*result*/) { return true; }
+    // virtual bool received(eosio::ship_protocol::get_blocks_result_v2& /*result*/) { return true; }
     virtual void closed(bool retry) = 0;
 };
 
@@ -63,15 +65,16 @@ struct connection : std::enable_shared_from_this<connection> {
         resolver.async_resolve(
             config.host, config.port, [self = shared_from_this(), this](error_code ec, tcp::resolver::results_type results) {
                 enter_callback(ec, "resolve", [&] {
+                    boost::asio::ip::tcp::socket & sock = stream.next_layer();
                     boost::asio::async_connect(
-                        stream.next_layer(), results.begin(), results.end(), [self = shared_from_this(), this](error_code ec, auto&) {
-                            enter_callback(ec, "connect", [&] {
-                                stream.async_handshake(config.host, "/", [self = shared_from_this(), this](error_code ec) {
-                                    enter_callback(ec, "handshake", [&] { //
-                                        start_read();
-                                    });
-                                });
-                            });
+                        sock, results.begin(), results.end(), [self = shared_from_this(), this](boost::system::error_code ec, auto&) {
+                            // enter_callback(ec, "connect", [&] {
+                            //     stream.async_handshake(config.host, "/", [self = shared_from_this(), this](error_code ec) {
+                            //         enter_callback(ec, "handshake", [&] { //
+                            //             start_read();
+                            //         });
+                            //     });
+                            // });
                         });
                 });
             });
@@ -135,7 +138,7 @@ struct connection : std::enable_shared_from_this<connection> {
             req.fetch_block            = false;
             req.fetch_traces           = true;
             req.fetch_deltas           = true;
-            req.fetch_block_header     = true;
+            req.fetch_finality_data    = true;
             send(req);
         }
         else {
@@ -152,7 +155,7 @@ struct connection : std::enable_shared_from_this<connection> {
         }
     }
 
-    void request_blocks(const eosio::ship_protocol::get_status_result_v0& status, uint32_t start_block_num, const std::vector<eosio::ship_protocol::block_position>& positions) {
+    void request_blocks(const eosio::ship_protocol::get_status_result_base& status, uint32_t start_block_num, const std::vector<eosio::ship_protocol::block_position>& positions) {
         uint32_t nodeos_start = 0xffff'ffff;
         if (status.trace_begin_block < status.trace_end_block)
             nodeos_start = std::min(nodeos_start, status.trace_begin_block);
@@ -172,14 +175,16 @@ struct connection : std::enable_shared_from_this<connection> {
     }
 
     template <typename F>
-    void catch_and_close(F f) {
+    void catch_and_close(F f, const char* where) {
         try {
             f();
         } catch (const std::exception& e) {
             elog("${e}", ("e", e.what()));
+            elog("${w}", ("w", where));
             close(false);
         } catch (...) {
             elog("unknown exception");
+            elog("${w}", ("w", where));
             close(false);
         }
     }
@@ -188,7 +193,7 @@ struct connection : std::enable_shared_from_this<connection> {
     void enter_callback(error_code ec, const char* what, F f) {
         if (ec)
             return on_fail(ec, what);
-        catch_and_close(f);
+        catch_and_close(f, what);
     }
 
     void on_fail(error_code ec, const char* what) {

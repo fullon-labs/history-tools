@@ -17,7 +17,7 @@ struct rocksdb_plugin_impl {
     std::mutex                      mutex          = {};
 };
 
-static abstract_plugin& _rocksdb_plugin = app().register_plugin<rocksdb_plugin>();
+static auto& _rocksdb_plugin = app().register_plugin<rocksdb_plugin>();
 
 rocksdb_plugin::rocksdb_plugin()
     : my(std::make_shared<rocksdb_plugin_impl>()) {}

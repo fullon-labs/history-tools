@@ -27,6 +27,7 @@
 #endif
 
 using namespace appbase;
+namespace bfs = boost::filesystem;
 
 namespace fc {
 std::unordered_map<std::string, appender::ptr>& get_appender_map();

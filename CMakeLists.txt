@@ -1,6 +1,6 @@
 # copyright defined in LICENSE.txt
 
-include(FetchContent)
+include(ExternalProject)
 
 cmake_minimum_required (VERSION 3.10)
 project(history-tools VERSION 1.0.0 LANGUAGES CXX)
@@ -15,10 +15,19 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake/Modules")
 set(EOSIO_WASM_OLD_BEHAVIOR "Off")
 set(Boost_USE_STATIC_LIBS ON)
 
+set( PUBLIC_KEY_LEGACY_PREFIX FO )
+
 add_definitions(-DBOOST_ASIO_DISABLE_STD_EXPERIMENTAL_STRING_VIEW)
 
-find_package(PostgreSQL REQUIRED COMPONENTS Libraries)
+include( GNUInstallDirs )
+
+# find_package(PostgreSQL REQUIRED COMPONENTS Libraries)
 find_package(Boost 1.70 REQUIRED COMPONENTS date_time filesystem chrono system iostreams program_options unit_test_framework)
+
+set(SKIP_PQXX_SHARED ON)
+set(SKIP_BUILD_TEST ON)
+add_subdirectory(external/libpqxx EXCLUDE_FROM_ALL)
+set(PQXX_LIBRARIES pqxx_static)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -40,37 +49,17 @@ endif()
 
 set(SKIP_FC_TESTS ON)
 
-FetchContent_Declare(
-  fc
-  GIT_REPOSITORY https://github.com/EOSIO/fc.git
-  GIT_TAG 50d57cbc6b2d1af6fd4a0930a5c98f7add900078       
-)
-FetchContent_MakeAvailable(fc)
-
-FetchContent_Declare(
-  appbase
-  GIT_REPOSITORY https://github.com/EOSIO/appbase.git
-  GIT_TAG 144b2e239d6fd93a8336543bf9eda7c52ea8c77e       
-)
-FetchContent_MakeAvailable(appbase)
-
-FetchContent_Declare(
-  abieos
-  GIT_REPOSITORY https://github.com/EOSIO/abieos.git
-  GIT_TAG acde00fc7d4b743e599ced8886a013cb16cccbc2       
-)
-FetchContent_MakeAvailable(abieos)
-
-FetchContent_Declare(
-  libpqxx
-  GIT_REPOSITORY https://github.com/jtv/libpqxx.git
-  GIT_TAG a6b1d60e74c1427c8ac2324b85cd4a0dc2068332       
-)
-set(SKIP_PQXX_SHARED ON)
-set(SKIP_BUILD_TEST ON)
-set(PQXX_LIBRARIES pqxx_static)
-
-FetchContent_MakeAvailable(libpqxx)
+if(NOT DEFINED SKIP_SUBMODULE_CHECK)
+    execute_process(COMMAND git submodule status --recursive
+                    COMMAND grep -c "^[+\-]"
+                    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+                    OUTPUT_VARIABLE submodule_status
+                    OUTPUT_STRIP_TRAILING_WHITESPACE)
+    if(submodule_status GREATER 0)
+    message(FATAL_ERROR "git submodules are not up to date.
+Please run the command 'git submodule update --init --recursive'.")
+    endif()
+endif()
 
 # Build Types
 set(CMAKE_BUILD_TYPE ${CMAKE_BUILD_TYPE}
@@ -101,14 +90,26 @@ set(WITH_TESTS OFF)
 
 add_compile_options(-Wno-error=shadow)
 
+set(APPBASE_DIR external/appbase)
+set(LIBFC_DIR external/fc)
+
+add_subdirectory(external/abieos EXCLUDE_FROM_ALL)
+add_subdirectory(${APPBASE_DIR} EXCLUDE_FROM_ALL)
+add_subdirectory(${LIBFC_DIR} EXCLUDE_FROM_ALL)
+
 add_executable(fill-pg src/main.cpp src/fill_plugin.cpp src/pg_plugin.cpp src/fill_pg_plugin.cpp src/abieos_sql_converter.cpp)
 
 target_include_directories(fill-pg
     PRIVATE
-        ${Boost_INCLUDE_DIR}
+        external/abieos/src
+        external/abieos/include
+        external/abieos/external/rapidjson/include
+        ${APPBASE_DIR}/include
+        ${LIBFC_DIR}/include
+        # ${Boost_INCLUDE_DIR}
 )
-target_link_libraries(fill-pg appbase fc abieos Boost::date_time Boost::filesystem Boost::chrono 
-                      Boost::system Boost::iostreams Boost::program_options Boost::unit_test_framework 
+target_link_libraries(fill-pg appbase fc abieos Boost::date_time Boost::filesystem Boost::chrono
+                      Boost::system Boost::iostreams Boost::program_options Boost::unit_test_framework
                       "${PQXX_LIBRARIES}" -lpthread)
 
 if(APPLE)

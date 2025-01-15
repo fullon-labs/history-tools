@@ -9,7 +9,7 @@ using namespace appbase;
 namespace kv  = state_history::kv;
 namespace rdb = state_history::rdb;
 
-static abstract_plugin& _wasm_ql_rocksdb_plugin = app().register_plugin<wasm_ql_rocksdb_plugin>();
+static auto& _wasm_ql_rocksdb_plugin = app().register_plugin<wasm_ql_rocksdb_plugin>();
 
 struct rocksdb_database_interface : database_interface, std::enable_shared_from_this<rocksdb_database_interface> {
     std::shared_ptr<::rocksdb_inst> rocksdb_inst;

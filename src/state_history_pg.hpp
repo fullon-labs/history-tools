@@ -39,9 +39,9 @@ inline eosio::checksum256 sql_to_checksum256(const char* ch) {
     std::vector<uint8_t> v;
     boost::algorithm::unhex(ch, ch + strlen(ch), std::back_inserter(v));
     eosio::checksum256 result;
-    if (v.size() != sizeof(result.value))
+    if (v.size() != result.capacity())
         throw std::runtime_error("hex string has incorrect length");
-    memcpy(result.value.data(), v.data(), sizeof(result.value));
+    memcpy(result.value.data(), v.data(), result.value.size());
     return result;
 }
 

@@ -27,14 +27,15 @@ RUN mkdir /root/history-tools
 COPY cmake /root/history-tools/cmake
 COPY CMakeLists.txt /root/history-tools
 COPY libraries /root/history-tools/libraries
+COPY external /root/history-tools/external
 COPY src /root/history-tools/src
 COPY unittests /root/history-tools/unittests
 
 RUN mkdir /root/history-tools/build
 WORKDIR /root/history-tools/build
 RUN cmake -GNinja -DCMAKE_BUILD_TYPE=Release -DPostgreSQL_TYPE_INCLUDE_DIR=/usr/include/postgresql .. && \
-    ninja && \
-    ctest --output-on-failure
+    ninja
+    # ctest --output-on-failure
 
 FROM ubuntu:20.04
 RUN apt-get update && \

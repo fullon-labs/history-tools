@@ -26,7 +26,7 @@ using namespace appbase;
 using namespace wasm_ql;
 using namespace std::literals;
 
-static abstract_plugin& _wasm_ql_plugin = app().register_plugin<wasm_ql_plugin>();
+static auto& _wasm_ql_plugin = app().register_plugin<wasm_ql_plugin>();
 
 struct wasm_ql_plugin_impl : std::enable_shared_from_this<wasm_ql_plugin_impl> {
     bool                                   stopping         = false;

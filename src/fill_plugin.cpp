@@ -10,7 +10,7 @@
 using namespace appbase;
 using namespace std::literals;
 
-static abstract_plugin& _fill_plugin = app().register_plugin<fill_plugin>();
+static auto& _fill_plugin = app().register_plugin<fill_plugin>();
 
 fill_plugin::fill_plugin() {}
 fill_plugin::~fill_plugin() {}
@@ -23,6 +23,7 @@ void fill_plugin::set_program_options(options_description& cli, options_descript
     clop("fill-skip-to,k", bpo::value<uint32_t>(), "Skip blocks before [arg]");
     clop("fill-stop,x", bpo::value<uint32_t>(), "Stop before block [arg]");
     clop("fill-trx", bpo::value<std::vector<std::string>>(), "Filter transactions 'include:status:receiver:act_account:act_name'");
+    clop("fill-table", bpo::value<std::string>(), "Filter table out 'table1,table2'");
 }
 
 void fill_plugin::plugin_initialize(const variables_map& options) {}
@@ -64,5 +65,26 @@ std::vector<state_history::trx_filter> fill_plugin::get_trx_filters(const variab
         return result;
     } catch (std::exception& e) {
         throw std::runtime_error("--fill-trx: "s + e.what());
+    }
+}
+
+std::set<std::string> fill_plugin::get_table_filter(const appbase::variables_map& options){
+    try{
+        std::set<std::string> result;
+        if(!options.count("fill-table")){
+        }else{
+            auto s = options["fill-table"].as<std::string>();
+            boost::erase_all(s, " ");
+            std::vector<std::string> split;
+            boost::split(split, s, [](char c) { return c == ','; });
+            for( const auto& name : split ){
+                //these tables must be created;
+                if( "transaction_trace" == name || "received_block" == name || "fill_status" == name) continue;
+                result.insert(name);
+            }
+        }
+        return result;
+    } catch (std::exception& e) {
+        throw std::runtime_error("--fill-table: "s + e.what());
     }
 }

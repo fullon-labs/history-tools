@@ -8,7 +8,7 @@
 using namespace appbase;
 using namespace std::literals;
 
-static abstract_plugin& _pg_plugin = app().register_plugin<pg_plugin>();
+static auto& _pg_plugin = app().register_plugin<pg_plugin>();
 
 pg_plugin::pg_plugin() {}
 pg_plugin::~pg_plugin() {}

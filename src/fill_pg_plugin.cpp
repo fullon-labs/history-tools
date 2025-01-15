@@ -100,6 +100,7 @@ struct fill_postgresql_config : connection_config {
     uint32_t                skip_to       = 0;
     uint32_t                stop_before   = 0;
     std::vector<trx_filter> trx_filters   = {};
+    std::set<std::string>   table_filter  = {};
     bool                    drop_schema   = false;
     bool                    create_schema = false;
     bool                    enable_trim   = false;
@@ -149,7 +150,10 @@ struct fpg_session : connection_callbacks, std::enable_shared_from_this<fpg_sess
     std::map<std::string, std::unique_ptr<table_stream>> table_streams;
     abieos_sql_converter                                 converter;
     std::map<std::string, eosio::abi_type>               abi_types;
+    bool                                                 is_write = false;
 
+    bool                                                 get_table = true;
+    std::set<std::string>                                tables;
     fpg_session(fill_postgresql_plugin_impl* my)
         : my(my)
         , config(my->config) {
@@ -203,6 +207,11 @@ struct fpg_session : connection_callbacks, std::enable_shared_from_this<fpg_sess
             create_tables();
             config->create_schema = false;
         }
+        if (get_table) {
+           tables    = get_tables();
+           get_table = false;
+        }
+        ilog("writable tables: ${tables}",("tables", tables));
         connection->send(get_status_request_v0{});
     }
 
@@ -215,6 +224,20 @@ struct fpg_session : connection_callbacks, std::enable_shared_from_this<fpg_sess
         pipeline.complete();
         t.commit();
 
+        connection->request_blocks(status, std::max(config->skip_to, head + 1), positions);
+        return true;
+    }
+
+    bool received(get_status_result_v1& status) override {
+
+        work_t t(*sql_connection);
+        load_fill_status(t);
+        auto       positions = get_positions(t);
+        pipeline_t pipeline(t);
+        truncate(t, pipeline, head + 1);
+        pipeline.complete();
+        t.commit();
+        // TODO: get_status_result_v1
         connection->request_blocks(status, std::max(config->skip_to, head + 1), positions);
         return true;
     }
@@ -244,6 +267,7 @@ struct fpg_session : connection_callbacks, std::enable_shared_from_this<fpg_sess
             {"block_num", "transaction_ordinal"}, exec);
 
         for (auto& table : connection->abi.tables) {
+            if ( config->table_filter.count(table.type) > 0 ) continue;
             std::vector<std::string> keys = {"block_num", "present"};
             keys.insert(keys.end(), table.key_names.begin(), table.key_names.end());
             converter.create_table(table.type, get_type(table.type), "block_num bigint, present smallint", keys, exec);
@@ -260,6 +284,7 @@ struct fpg_session : connection_callbacks, std::enable_shared_from_this<fpg_sess
         for (auto& table : connection->abi.tables) {
             if (table.key_names.empty())
                 continue;
+            if ( tables.count(table.type) == 0 ) continue;
             std::string query = "create index if not exists " + table.type;
             for (auto& k : table.key_names)
                 query += "_" + k;
@@ -332,6 +357,7 @@ struct fpg_session : connection_callbacks, std::enable_shared_from_this<fpg_sess
         };
 
         for (auto& table : connection->abi.tables) {
+            if ( tables.count(table.type) == 0 ) continue;
             if (table.key_names.empty()) {
                 query += R"(
                     for key_search in
@@ -365,7 +391,7 @@ struct fpg_session : connection_callbacks, std::enable_shared_from_this<fpg_sess
             };
         }
         query += R"(
-                end 
+                end
             $$ language plpgsql;
         )";
 
@@ -394,6 +420,21 @@ struct fpg_session : connection_callbacks, std::enable_shared_from_this<fpg_sess
         return result;
     }
 
+    std::set<std::string>  get_tables() {
+        work_t t(*sql_connection);
+        std::set<std::string> result;
+        std::string schema = config->schema;
+        auto  rows = t.exec(
+            "SELECT table_name FROM information_schema.tables where table_schema = '" + schema +"' order by table_name");
+        t.commit();
+        for (auto row : rows) {
+            if ( config->table_filter.count(row[0].as<std::string>()) > 0 ) continue;
+            result.emplace(row[0].as<std::string>());
+        }
+
+        return result;
+    }
+
     void write_fill_status(work_t& t, pipeline_t& pipeline) {
         std::string query =
             "update " + converter.schema_name + ".fill_status set head=" + std::to_string(head) + ", head_id=" + quote(head_id) + ", ";
@@ -403,6 +444,7 @@ struct fpg_session : connection_callbacks, std::enable_shared_from_this<fpg_sess
             query += "irreversible=" + std::to_string(head) + ", irreversible_id=" + quote(head_id);
         query += ", first=" + std::to_string(first);
         pipeline.insert(query);
+        is_write = true;
     }
 
     void truncate(work_t& t, pipeline_t& pipeline, uint32_t block) {
@@ -415,6 +457,7 @@ struct fpg_session : connection_callbacks, std::enable_shared_from_this<fpg_sess
         trunc("transaction_trace");
         trunc("block_info");
         for (auto& table : connection->abi.tables) {
+            if ( tables.count( table.type ) == 0 ) continue;
             trunc(table.type);
         }
 
@@ -430,14 +473,13 @@ struct fpg_session : connection_callbacks, std::enable_shared_from_this<fpg_sess
         first = std::min(first, head);
     } // truncate
 
-    
+
     template <typename GetBlockResult, typename HandleBlocksTracesDelta>
     bool process_blocks_result(GetBlockResult& result, HandleBlocksTracesDelta&& handler) {
         if (!result.this_block)
             return true;
         bool bulk         = result.this_block->block_num + 4 < result.last_irreversible.block_num;
         bool large_deltas = false;
-        bool forks        = false;
         auto deltas_size  = num_bytes(result.deltas);
 
         if (!bulk && deltas_size >= 10 * 1024 * 1024) {
@@ -456,7 +498,6 @@ struct fpg_session : connection_callbacks, std::enable_shared_from_this<fpg_sess
             close_streams();
             ilog("switch forks at block ${b}", ("b", result.this_block->block_num));
             bulk = false;
-            forks = true;
         }
 
         if (!bulk || large_deltas || !(result.this_block->block_num % 200))
@@ -482,10 +523,7 @@ struct fpg_session : connection_callbacks, std::enable_shared_from_this<fpg_sess
         if (!first)
             first = head;
         if (!bulk) {
-
-            if (!forks)
-                flush_streams();
-
+            flush_streams();
             write_fill_status(t, pipeline);
         }
         pipeline.insert(
@@ -501,29 +539,32 @@ struct fpg_session : connection_callbacks, std::enable_shared_from_this<fpg_sess
         return true;
     }
 
-    bool received(get_blocks_result_v2& result) override {
-        return process_blocks_result(result, [this,&result](bool bulk) {
-            if (!result.block_header.empty())
-                receive_block(result.this_block->block_num, result.this_block->block_id, result.block_header);
-            if (!result.deltas.empty())
-                receive_deltas(result.this_block->block_num, result.deltas, bulk);
-            if (!result.traces.empty())
-                receive_traces(result.this_block->block_num, result.traces);
-        });
-    }
+    // bool received(get_blocks_result_v2& result) override {
+    //     return process_blocks_result(result, [this,&result](bool bulk) {
+    //         if (!result.block_header.empty())
+    //             receive_block(result.this_block->block_num, result.this_block->block_id, result.block_header);
+    //         if (!result.deltas.empty())
+    //             receive_deltas(result.this_block->block_num, result.deltas, bulk);
+    //         if (!result.traces.empty())
+    //             receive_traces(result.this_block->block_num, result.traces);
+    //     });
+    // }
 
     bool received(get_blocks_result_v1& result) override {
-        return process_blocks_result(result, [this,&result](bool bulk) {
-            if (result.block) {
-                const signed_block_header& header = std::visit([](const auto& v) -> const signed_block_header& { return v; }, result.block.value());
-                std::vector<char>   data   = eosio::convert_to_bin(header);
-                receive_block(result.this_block->block_num, result.this_block->block_id, eosio::as_opaque<signed_block_header>(eosio::input_stream{data}));
-            }
-            if (!result.deltas.empty())
-                receive_deltas(result.this_block->block_num, result.deltas, bulk);
-            if (!result.traces.empty())
-                receive_traces(result.this_block->block_num, result.traces);
-        });
+        // return process_blocks_result(result, [this,&result](bool bulk) {
+        //     if (result.block) {
+        //         const signed_block_header& header = std::visit([](const auto& v) -> const signed_block_header& { return v; }, result.block.value());
+        //         std::vector<char>   data   = eosio::convert_to_bin(header);
+        //         receive_block(result.this_block->block_num, result.this_block->block_id, eosio::as_opaque<signed_block_header>(eosio::input_stream{data}));
+        //     }
+        //     if (!result.deltas.empty())
+        //         receive_deltas(result.this_block->block_num, result.deltas, bulk);
+        //     if (!result.traces.empty())
+        //         receive_traces(result.this_block->block_num, result.traces);
+        // });
+        auto ret = received((get_blocks_result_v0&)result);
+        // TODO: get_blocks_result_v1
+        return ret;
     }
 
     bool received(get_blocks_result_v0& result) override {
@@ -539,7 +580,7 @@ struct fpg_session : connection_callbacks, std::enable_shared_from_this<fpg_sess
                 receive_traces(
                     result.this_block->block_num, eosio::as_opaque<std::vector<eosio::ship_protocol::transaction_trace>>(*result.traces));
         });
-    } 
+    }
 
     void write_stream(uint32_t block_num, const std::string& name, const std::vector<std::string>& values) {
         if (!first_bulk)
@@ -551,11 +592,14 @@ struct fpg_session : connection_callbacks, std::enable_shared_from_this<fpg_sess
     }
 
     void flush_streams() {
-        for (auto& [_, ts] : table_streams) {
-            ts->writer.complete();
-            ts->t.commit();
+        if (is_write) {
+            for (auto& [_, ts] : table_streams) {
+                ts->writer.complete();
+                ts->t.commit();
+            }
+            table_streams.clear();
         }
-        table_streams.clear();
+        is_write = false;
     }
 
     void close_streams() {
@@ -596,6 +640,7 @@ struct fpg_session : connection_callbacks, std::enable_shared_from_this<fpg_sess
                     throw std::runtime_error("don't know how to process " + t_delta.name);
 
                 for (auto& row : t_delta.rows) {
+                    if ( tables.count(t_delta.name) == 0 ) continue;
                     if (t_delta.rows.size() > 10000 && !(num_processed % 10000))
                         ilog(
                             "block ${b} ${t} ${n} of ${r} bulk=${bulk}",
@@ -671,7 +716,7 @@ struct fpg_session : connection_callbacks, std::enable_shared_from_this<fpg_sess
     ~fpg_session() {}
 }; // fpg_session
 
-static abstract_plugin& _fill_postgresql_plugin = app().register_plugin<fill_pg_plugin>();
+static auto& _fill_postgresql_plugin = app().register_plugin<fill_pg_plugin>();
 
 fill_postgresql_plugin_impl::~fill_postgresql_plugin_impl() {
     if (session)
@@ -708,6 +753,7 @@ void fill_pg_plugin::plugin_initialize(const variables_map& options) {
         my->config->skip_to       = options.count("fill-skip-to") ? options["fill-skip-to"].as<uint32_t>() : 0;
         my->config->stop_before   = options.count("fill-stop") ? options["fill-stop"].as<uint32_t>() : 0;
         my->config->trx_filters   = fill_plugin::get_trx_filters(options);
+        my->config->table_filter  = fill_plugin::get_table_filter(options);
         my->config->drop_schema   = options.count("fpg-drop");
         my->config->create_schema = options.count("fpg-create");
         my->config->enable_trim   = options.count("fill-trim");

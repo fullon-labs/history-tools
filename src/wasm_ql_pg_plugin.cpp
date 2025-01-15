@@ -9,7 +9,7 @@
 using namespace appbase;
 namespace pg = state_history::pg;
 
-static abstract_plugin& _wasm_ql_pg_plugin = app().register_plugin<wasm_ql_pg_plugin>();
+static auto& _wasm_ql_pg_plugin = app().register_plugin<wasm_ql_pg_plugin>();
 
 struct pg_database_interface : database_interface, std::enable_shared_from_this<pg_database_interface> {
     std::string                       schema = {};

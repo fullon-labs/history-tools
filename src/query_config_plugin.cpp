@@ -8,7 +8,7 @@
 using namespace appbase;
 using namespace std::literals;
 
-static abstract_plugin& _query_config_plugin = app().register_plugin<query_config_plugin>();
+static auto& _query_config_plugin = app().register_plugin<query_config_plugin>();
 
 query_config_plugin::query_config_plugin() {}
 query_config_plugin::~query_config_plugin() {}
