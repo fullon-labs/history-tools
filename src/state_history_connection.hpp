@@ -65,16 +65,15 @@ struct connection : std::enable_shared_from_this<connection> {
         resolver.async_resolve(
             config.host, config.port, [self = shared_from_this(), this](error_code ec, tcp::resolver::results_type results) {
                 enter_callback(ec, "resolve", [&] {
-                    boost::asio::ip::tcp::socket & sock = stream.next_layer();
                     boost::asio::async_connect(
-                        sock, results.begin(), results.end(), [self = shared_from_this(), this](boost::system::error_code ec, auto&) {
-                            // enter_callback(ec, "connect", [&] {
-                            //     stream.async_handshake(config.host, "/", [self = shared_from_this(), this](error_code ec) {
-                            //         enter_callback(ec, "handshake", [&] { //
-                            //             start_read();
-                            //         });
-                            //     });
-                            // });
+                        stream.next_layer(), results.begin(), results.end(), [self = shared_from_this(), this](error_code ec, auto&) {
+                            enter_callback(ec, "connect", [&] {
+                                stream.async_handshake(config.host, "/", [self = shared_from_this(), this](error_code ec) {
+                                    enter_callback(ec, "handshake", [&] { //
+                                        start_read();
+                                    });
+                                });
+                            });
                         });
                 });
             });
