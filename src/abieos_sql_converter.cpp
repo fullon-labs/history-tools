@@ -67,9 +67,11 @@ abieos_sql_converter::field_def
 get_field_def(std::string schema_name, const eosio::abi_field& field, const abieos_sql_converter::basic_converters_t& basic_converters) {
     auto        type = field.type;
     std::string type_suffix;
-    if (type->optional_of())
+    if (type->optional_of()) {
         type = type->optional_of();
-    else if (type->array_of()) {
+    } else if (type->extension_of()) {
+        type        = type->extension_of();
+    } else if (type->array_of()) {
         type        = type->array_of();
         type_suffix = "[]";
     }
@@ -131,7 +133,7 @@ abieos_sql_converter::union_fields_t::union_fields_t(std::string schema_name, co
                         // different field type
                         itr->name.insert(0, elements[i - 1].name + "_");
                         this->insert(++itr, f_def);
-                    } 
+                    }
                 } else {
                     pending_fields.push_back(f_def);
                 }
@@ -150,6 +152,8 @@ void abieos_sql_converter::create_sql_type(const eosio::abi_type* type, const st
         create_sql_type(type->array_of(), exec, false);
     } else if (type->optional_of()) {
         create_sql_type(type->optional_of(), exec, is_union_field);
+    } else if (type->extension_of()) {
+        create_sql_type(type->extension_of(), exec, is_union_field);
     } else if (type->as_variant()) {
         create_sql_type(type->name, type->as_variant(), exec);
     }
@@ -169,13 +173,13 @@ std::string abieos_sql_converter::create_sql_type(
             if (struct_abi_type->fields.size() > 1) {
                 std::string query = "create type " + sql_type + " as (" + sub_fields.substr(2) + ")";
                 exec(query);
-            }   
+            }
             else {
-                // if we have only one filed, just flattern it. 
+                // if we have only one filed, just flattern it.
                 auto pos = sub_fields.rfind(" ");
                 sql_type = sub_fields.substr(pos+1);
             }
-        } 
+        }
         created_composite_types.emplace(sql_type);
     }
     return sql_type;
@@ -241,6 +245,16 @@ std::string abieos_sql_converter::to_sql_value(eosio::input_stream& bin, const e
     if (type->optional_of()) {
         bin.read_raw(present);
         type = type->optional_of();
+        if (!present) {
+            if (field_kind == abieos_sql_converter::table_field)
+                return "\\N";
+            return "";
+        }
+    }
+
+    if (type->extension_of()) {
+        present = bin.remaining();
+        type = type->extension_of();
         if (!present) {
             if (field_kind == abieos_sql_converter::table_field)
                 return "\\N";

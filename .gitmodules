@@ -4,9 +4,6 @@
 [submodule "external/rocksdb"]
 	path = external/rocksdb
 	url = https://github.com/facebook/rocksdb.git
-[submodule "external/abieos"]
-	path = external/abieos
-	url = https://github.com/fullon-labs/abieos.git
 [submodule "external/eos-vm"]
 	path = external/eos-vm
 	url = https://github.com/EOSIO/eos-vm.git
@@ -16,3 +13,6 @@
 [submodule "external/appbase"]
 	path = external/appbase
 	url = https://github.com/fullon-labs/eos-appbase.git
+[submodule "external/abieos"]
+	path = external/abieos
+	url = https://github.com/fullon-labs/abieos.git
