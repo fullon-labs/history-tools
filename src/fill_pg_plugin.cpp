@@ -25,6 +25,7 @@ using boost::beast::flat_buffer;
 using boost::system::error_code;
 
 inline std::string to_string(const eosio::checksum256& v) { return sql_str(v); }
+inline std::string safe_sql_str(const eosio::block_timestamp& v) { return v.slot ?  sql_str(v.to_time_point()) : "\\N"; }
 
 inline std::string quote(std::string s) { return "'" + s + "'"; }
 
@@ -263,14 +264,14 @@ struct fpg_session : connection_callbacks, std::enable_shared_from_this<fpg_sess
         converter.create_table("block_info", get_type("signed_block_header"), "block_num bigint, block_id varchar(64)", {"block_num"}, exec);
 
         converter.create_table(
-            "transaction_trace", get_type("transaction_trace"), "block_num bigint, transaction_ordinal integer",
+            "transaction_trace", get_type("transaction_trace"), "block_num bigint, transaction_ordinal integer, block_timestamp timestamp without time zone",
             {"block_num", "transaction_ordinal"}, exec);
 
         for (auto& table : connection->abi.tables) {
             if ( config->table_filter.count(table.type) > 0 ) continue;
             std::vector<std::string> keys = {"block_num", "present"};
             keys.insert(keys.end(), table.key_names.begin(), table.key_names.end());
-            converter.create_table(table.type, get_type(table.type), "block_num bigint, present smallint", keys, exec);
+            converter.create_table(table.type, get_type(table.type), "block_num bigint, present smallint, block_timestamp timestamp without time zone", keys, exec);
         }
 
         t.commit();
@@ -569,16 +570,30 @@ struct fpg_session : connection_callbacks, std::enable_shared_from_this<fpg_sess
 
     bool received(get_blocks_result_v0& result) override {
         return process_blocks_result(result, [this,&result](bool bulk) {
+
+            dlog("received block[${b}]=${i}], has_block=${hb}, has_deltas=${hd}, has_traces=${ht}",
+                ("b", result.this_block->block_num)
+                ("i", sql_str(result.this_block->block_id))
+                ("hb", bool(result.block))
+                ("hd", bool(result.deltas))
+                ("ht", bool(result.traces)) );
+
+            eosio::block_timestamp block_timestamp;
             if (result.block) {
                 auto     block_bin = *result.block;
+
+                auto old_pos = block_bin.pos;
+                eosio::from_bin(block_timestamp, block_bin);
+                block_bin.pos = old_pos;
+
                 receive_block(result.this_block->block_num, result.this_block->block_id, eosio::as_opaque<signed_block_header>(block_bin));
             }
             if (result.deltas)
                 receive_deltas(
-                    result.this_block->block_num, eosio::as_opaque<std::vector<eosio::ship_protocol::table_delta>>(*result.deltas), bulk);
+                    result.this_block->block_num, block_timestamp, eosio::as_opaque<std::vector<eosio::ship_protocol::table_delta>>(*result.deltas), bulk);
             if (result.traces)
                 receive_traces(
-                    result.this_block->block_num, eosio::as_opaque<std::vector<eosio::ship_protocol::transaction_trace>>(*result.traces));
+                    result.this_block->block_num, block_timestamp, eosio::as_opaque<std::vector<eosio::ship_protocol::transaction_trace>>(*result.traces));
         });
     }
 
@@ -625,15 +640,19 @@ struct fpg_session : connection_callbacks, std::enable_shared_from_this<fpg_sess
         write_stream(block_num, "block_info", values);
     }
 
-    void receive_deltas(uint32_t block_num, eosio::opaque<std::vector<eosio::ship_protocol::table_delta>> delta, bool bulk) {
-        for_each(delta, [ this, block_num, bulk ](table_delta&& t_delta){
-            write_table_delta(block_num, std::move(t_delta), bulk);
+    void receive_deltas(uint32_t block_num, const eosio::block_timestamp &block_timestamp,
+                eosio::opaque<std::vector<eosio::ship_protocol::table_delta>> delta, bool bulk)
+    {
+        for_each(delta, [ this, block_num, &block_timestamp, bulk ](table_delta&& t_delta){
+            write_table_delta(block_num, block_timestamp, std::move(t_delta), bulk);
         });
     }
 
-    void write_table_delta(uint32_t block_num, table_delta&& t_delta, bool bulk) {
+    void write_table_delta(uint32_t block_num, const eosio::block_timestamp &block_timestamp,
+                table_delta&& t_delta, bool bulk)
+    {
         std::visit(
-            [&block_num, bulk, this](auto t_delta) {
+            [&block_num, &block_timestamp, bulk, this](auto t_delta) {
                 size_t num_processed = 0;
                 auto&  type          = get_type(t_delta.name);
                 if (type.as_variant() == nullptr && type.as_struct() == nullptr)
@@ -646,7 +665,7 @@ struct fpg_session : connection_callbacks, std::enable_shared_from_this<fpg_sess
                             "block ${b} ${t} ${n} of ${r} bulk=${bulk}",
                             ("b", block_num)("t", t_delta.name)("n", num_processed)("r", t_delta.rows.size())("bulk", bulk));
 
-                    std::vector<std::string> values{std::to_string(block_num), std::to_string((unsigned)row.present)};
+                    std::vector<std::string> values{std::to_string(block_num), std::to_string((unsigned)row.present), safe_sql_str(block_timestamp)};
                     if (type.as_variant())
                         converter.to_sql_values(row.data, t_delta.name, *type.as_variant(), values);
                     else if (type.as_struct())
@@ -658,7 +677,9 @@ struct fpg_session : connection_callbacks, std::enable_shared_from_this<fpg_sess
             t_delta);
     }
 
-    void receive_traces(uint32_t block_num, eosio::opaque<std::vector<eosio::ship_protocol::transaction_trace>> traces) {
+    void receive_traces(uint32_t block_num, const eosio::block_timestamp &block_timestamp,
+                eosio::opaque<std::vector<eosio::ship_protocol::transaction_trace>> traces)
+    {
         auto     bin = traces.get();
         uint32_t num;
         varuint32_from_bin(num, bin);
@@ -668,24 +689,24 @@ struct fpg_session : connection_callbacks, std::enable_shared_from_this<fpg_sess
             transaction_trace trace;
             from_bin(trace, bin);
             if (filter(config->trx_filters, trace))
-                write_transaction_trace(block_num, num_ordinals, trace, trace_bin);
+                write_transaction_trace(block_num, block_timestamp, num_ordinals, trace, trace_bin);
         }
     }
 
-    void write_transaction_trace(
-        uint32_t block_num, uint32_t& num_ordinals, const eosio::ship_protocol::transaction_trace& trace, eosio::input_stream trace_bin) {
-
+    void write_transaction_trace(uint32_t block_num, const eosio::block_timestamp &block_timestamp,
+                uint32_t& num_ordinals, const eosio::ship_protocol::transaction_trace& trace, eosio::input_stream trace_bin)
+    {
         auto failed = std::visit(
             [](auto& ttrace) { return !ttrace.failed_dtrx_trace.empty() ? &ttrace.failed_dtrx_trace[0].recurse : nullptr; }, trace);
         if (failed != nullptr) {
             if (!filter(config->trx_filters, *failed))
                 return;
             std::vector<char> data = eosio::convert_to_bin(*failed);
-            write_transaction_trace(block_num, num_ordinals, *failed, eosio::input_stream{data});
+            write_transaction_trace(block_num, block_timestamp, num_ordinals, *failed, eosio::input_stream{data});
         }
 
         auto                     transaction_ordinal = ++num_ordinals;
-        std::vector<std::string> values{std::to_string(block_num), std::to_string(transaction_ordinal)};
+        std::vector<std::string> values{std::to_string(block_num), std::to_string(transaction_ordinal), safe_sql_str(block_timestamp)};
         converter.to_sql_values(trace_bin, "transaction_trace", *get_type("transaction_trace").as_variant(), values);
         write_stream(block_num, "transaction_trace", values);
     } // write_transaction_trace
