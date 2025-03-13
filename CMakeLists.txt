@@ -93,7 +93,7 @@ add_compile_options(-Wno-error=shadow)
 set(APPBASE_DIR external/appbase)
 set(LIBFC_DIR external/fc)
 
-add_subdirectory(external/abieos EXCLUDE_FROM_ALL)
+add_subdirectory(external/flon_abi EXCLUDE_FROM_ALL)
 add_subdirectory(${APPBASE_DIR} EXCLUDE_FROM_ALL)
 add_subdirectory(${LIBFC_DIR} EXCLUDE_FROM_ALL)
 
@@ -101,14 +101,14 @@ add_executable(fill-pg src/main.cpp src/fill_plugin.cpp src/pg_plugin.cpp src/fi
 
 target_include_directories(fill-pg
     PRIVATE
-        external/abieos/src
-        external/abieos/include
-        external/abieos/external/rapidjson/include
+        external/flon_abi/src
+        external/flon_abi/include
+        external/flon_abi/external/rapidjson/include
         ${APPBASE_DIR}/include
         ${LIBFC_DIR}/include
         # ${Boost_INCLUDE_DIR}
 )
-target_link_libraries(fill-pg appbase fc abieos Boost::date_time Boost::filesystem Boost::chrono
+target_link_libraries(fill-pg appbase fc flon_abi Boost::date_time Boost::filesystem Boost::chrono
                       Boost::system Boost::iostreams Boost::program_options Boost::unit_test_framework
                       "${PQXX_LIBRARIES}" -lpthread)
 

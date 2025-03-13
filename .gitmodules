@@ -13,6 +13,6 @@
 [submodule "external/appbase"]
 	path = external/appbase
 	url = https://github.com/fullon-labs/eos-appbase.git
-[submodule "external/abieos"]
-	path = external/abieos
-	url = https://github.com/fullon-labs/abieos.git
+[submodule "external/flon_abi"]
+	path = external/flon_abi
+	url = https://github.com/fullon-labs/flon.abi
