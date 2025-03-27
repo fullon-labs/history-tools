@@ -102,7 +102,7 @@ struct connection : std::enable_shared_from_this<connection> {
         std::string buf((const char *)data.data(), data.size());
         auto is   = eosio::json_token_stream{buf.data()};
         from_json(abi, is);
-        if (abi.version.substr(0, 13) != "eosio::abi/1.") {
+        if (abi.version.substr(0, 13) != "flon::abi/1.") {
             throw std::runtime_error("unsupported abi version");
         }
         eosio::abi a;
