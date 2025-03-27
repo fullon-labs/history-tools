@@ -13,6 +13,7 @@
 #include <boost/beast/websocket.hpp>
 #include <boost/algorithm/string/predicate.hpp>
 #include <fc/exception/exception.hpp>
+#include <abieos.hpp>
 
 namespace state_history {
 
@@ -102,7 +103,7 @@ struct connection : std::enable_shared_from_this<connection> {
         std::string buf((const char *)data.data(), data.size());
         auto is   = eosio::json_token_stream{buf.data()};
         from_json(abi, is);
-        if (abi.version.substr(0, 13) != "flon::abi/1.") {
+        if (abi.version.substr(0, abieos::abi_version_prefix.size()) != abieos::abi_version_prefix) {
             throw std::runtime_error("unsupported abi version");
         }
         eosio::abi a;
