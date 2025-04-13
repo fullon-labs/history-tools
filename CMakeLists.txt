@@ -3,7 +3,12 @@
 include(ExternalProject)
 
 cmake_minimum_required (VERSION 3.10)
-project(history-tools VERSION 1.0.0 LANGUAGES CXX)
+set(VERSION_MAJOR 0)
+set(VERSION_MINOR 3)
+set(VERSION_PATCH 1)
+set(VERSION_SUFFIX alpha)
+project(history-tools VERSION ${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH} LANGUAGES CXX)
+
 
 cmake_policy(SET CMP0077 NEW)
 set(ENABLE_INSTALL OFF cache bool "")
