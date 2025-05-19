@@ -7,7 +7,14 @@ set(VERSION_MAJOR 0)
 set(VERSION_MINOR 3)
 set(VERSION_PATCH 1)
 set(VERSION_SUFFIX alpha)
-project(history-tools VERSION ${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH} LANGUAGES CXX)
+
+if(VERSION_SUFFIX)
+    set(VERSION_FULL "${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}-${VERSION_SUFFIX}")
+else()
+    set(VERSION_FULL "${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}")
+endif()
+
+project(history-tools LANGUAGES CXX)
 
 
 cmake_policy(SET CMP0077 NEW)
@@ -25,6 +32,8 @@ set( PUBLIC_KEY_LEGACY_PREFIX FO )
 add_definitions(-DBOOST_ASIO_DISABLE_STD_EXPERIMENTAL_STRING_VIEW)
 
 include( GNUInstallDirs )
+
+message(STATUS "Building history-tools v${VERSION_FULL} ...")
 
 # find_package(PostgreSQL REQUIRED COMPONENTS Libraries)
 find_package(Boost 1.70 REQUIRED COMPONENTS date_time filesystem chrono system iostreams program_options unit_test_framework)
@@ -98,6 +107,7 @@ add_compile_options(-Wno-error=shadow)
 set(APPBASE_DIR external/appbase)
 set(LIBFC_DIR external/fc)
 
+add_subdirectory(libraries)
 add_subdirectory(external/flon_abi EXCLUDE_FROM_ALL)
 add_subdirectory(${APPBASE_DIR} EXCLUDE_FROM_ALL)
 add_subdirectory(${LIBFC_DIR} EXCLUDE_FROM_ALL)
@@ -113,7 +123,7 @@ target_include_directories(fill-pg
         ${LIBFC_DIR}/include
         # ${Boost_INCLUDE_DIR}
 )
-target_link_libraries(fill-pg appbase fc flon_abi Boost::date_time Boost::filesystem Boost::chrono
+target_link_libraries(fill-pg version appbase fc flon_abi Boost::date_time Boost::filesystem Boost::chrono
                       Boost::system Boost::iostreams Boost::program_options Boost::unit_test_framework
                       "${PQXX_LIBRARIES}" -lpthread)
 

@@ -6,6 +6,9 @@
 #include <fc/filesystem.hpp>
 #include <fc/log/appender.hpp>
 #include <fc/log/logger_config.hpp>
+#include <fc/crypto/hex.hpp>
+
+#include <eosio/version/version.hpp>
 
 #include <boost/dll/runtime_symbol_info.hpp>
 #include <boost/exception/diagnostic_information.hpp>
@@ -88,9 +91,18 @@ int main(int argc, char** argv) {
         auto root = fc::app_path();
         app().set_default_data_dir(root / "flon/" APP_NAME "/data");
         app().set_default_config_dir(root / "flon/" APP_NAME "/config");
+
+        uint32_t short_hash = 0;
+        fc::from_hex(eosio::version::version_hash(), (char*)&short_hash, sizeof(short_hash));
+
+        app().set_version(htonl(short_hash));
+        app().set_version_string(eosio::version::version_client());
+        app().set_full_version_string(eosio::version::version_full());
+
         if (!app().initialize<DEFAULT_PLUGINS>(argc, argv))
             return initialize_fail;
         initialize_logging();
+
         ilog(APP_NAME " version ${ver}", ("ver", app().version_string()));
         ilog(APP_NAME " using configuration file ${c}", ("c", app().full_config_file_path().string()));
         ilog(APP_NAME " data directory is ${d}", ("d", app().data_dir().string()));
